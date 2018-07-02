@@ -120,6 +120,14 @@ def STARrmRep(infile, outfile):
     > %(outfile)s
     '''
     P.run()
+    
+# FASTQC
+@transform('*bamUnmapped.out.mate1', regex(r'(.*).bamUnmapped.out.mate1'), r'\.fastqc') ### check output file naming from above
+def fastqc2(infile,outfile):
+    ''' does fastqc on mapped repetitive elements from STARrmRep '''
+    statement = ''' fastqc %(infile)s -o %(fastqc2_fastqcdir)s > %(outfile)s
+    '''
+    P.run()
    
 # ---------------------------------------------------
 # Generic pipeline tasks
