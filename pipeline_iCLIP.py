@@ -81,10 +81,11 @@ need to change env name from py36-v1 to desired one'''
 @split('*.fastq.gz', '*.demux.fastq.gz')
 def demux(infile, outfiles):    
     ''' demultiplex and move UMI to end of header using iCount '''
+    startfile = " ".join(infile)
     statement = ''' 
     PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/iCount/bin
     CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/iCount
-    iCount demultiplex %(infile)s
+    iCount demultiplex %(startfile)s
     %(adapter)s
     %(demux_barcodes)s
     --out_dir "%(general_outputdir)s"

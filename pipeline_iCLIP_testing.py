@@ -95,10 +95,12 @@ def cutadapt(infile, outfile):
 
 
 # STAR remove Reps
-@transform(cutadapt, suffix('.trim.fastq.gz'), '.rep.bam')
+@follows(mkdir("mappedreps"))
+@transform(cutadapt, regex(r'(\S+).trim.fastq.gz'), r'mappedreps/\1.rep.bam')
 def STARrmRep(infile, outfile):
     ''' maps to repetitive elements, produces 2 files:
         mapped - file1.name; unmapped file2.name '''
+    outprefix = P.snip(outfile, ".bam")
     statement = ''' STAR  --runMode alignReads
     --runThreadN 8
     --genomeDir %(STARrmRep_repbase)s
@@ -107,22 +109,21 @@ def STARrmRep(infile, outfile):
     --outSAMunmapped Within
     --outFilterMultimapNmax 30
     --outFilterMultimapScoreRange 1
-    --outFileNamePrefix %(general_outputdir)s
+    --outFileNamePrefix %(outprefix)s
     --outSAMattributes All
     --readFilesCommand zcat
     --outStd BAM_Unsorted
-    --outSAMtype BAM Unsorted
+    --outSAMtype BAM SortedByCoordinate
     --outFilterType BySJout
     --outReadsUnmapped Fastx
     --outFilterScoreMin 10
-    --outSAMattrRGline ID:foo
     --alignEndsType EndToEnd
     > %(outfile)s
     '''
     P.run()
     
 # FASTQC
-@transform('*bamUnmapped.out.mate1', regex(r'(.*).bamUnmapped.out.mate1'), r'\.fastqc') ### check output file naming from above
+@transform('*bamUnmapped.out.mate1', regex(r'(.*).bamUnmapped.out.mate1'), r'\.fastqc')
 def fastqc2(infile,outfile):
     ''' does fastqc on mapped repetitive elements from STARrmRep '''
     statement = ''' fastqc %(infile)s -o %(fastqc2_fastqcdir)s > %(outfile)s
