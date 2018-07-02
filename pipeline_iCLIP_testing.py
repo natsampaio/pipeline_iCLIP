@@ -83,19 +83,17 @@ need to change env name from py36 to desired one'''
 
 ''' If I am to demultiplex using iCount:
 '''
-    
+
 # Cutadapt
+
 @transform('*NN.fastq.gz', regex(r'demux_NNN(.*)NN.fastq.gz'), r'\1.trim.fastq.gz') 
 def cutadapt(infile, outfile):
     ''' trims 3' adapter and removes low quality reads '''
-    statement = ''' cutadapt -q %(cutadapt_minphred)s -a %(general_adapter)s
+    statement = ''' cutadapt -q %(cutadapt_minphred)s --m %(cutadapt_minlength) -a %(general_adapter)s
     -o %(outfile)s %(infile)s
     '''
     P.run()
 
-
-# STAR remove Reps
-@follows(mkdir("mappedreps"))
 @transform(cutadapt, regex(r'(\S+).trim.fastq.gz'), r'mappedreps/\1.rep.bam')
 def STARrmRep(infile, outfile):
     ''' maps to repetitive elements, produces 2 files:
@@ -105,6 +103,7 @@ def STARrmRep(infile, outfile):
     --runThreadN 8
     --genomeDir %(STARrmRep_repbase)s
     --genomeLoad LoadAndRemove
+    --limitBAMsortRAM 10000000000
     --readFilesIn %(infile)s
     --outSAMunmapped Within
     --outFilterMultimapNmax 30
@@ -121,12 +120,19 @@ def STARrmRep(infile, outfile):
     > %(outfile)s
     '''
     P.run()
-    
-# FASTQC
-@transform('*bamUnmapped.out.mate1', regex(r'(.*).bamUnmapped.out.mate1'), r'\.fastqc')
-def fastqc2(infile,outfile):
-    ''' does fastqc on mapped repetitive elements from STARrmRep '''
-    statement = ''' fastqc %(infile)s -o %(fastqc2_fastqcdir)s > %(outfile)s
+
+
+# Count Reps
+@follows(STARrmRep)
+@transform(STARrmRep, suffix('.rep.bam'), '.metrics')
+def countRep(infile, outfile):
+    '''counts number reads mapping to each rep element'''
+    statement = '''
+    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
+    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2
+    samtools view %(infile)s | 
+    /t1-data/user/nsampaio/software/gscripts/gscripts/general/count_aligned_from_sam.py 
+    > %(outfile)s
     '''
     P.run()
    

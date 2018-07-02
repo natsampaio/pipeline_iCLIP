@@ -92,46 +92,63 @@ def demux(infile, outfiles):
     '''
     P.run()
 
+
 # Cutadapt
+@follows(demux)
 @transform('*NN.fastq.gz', regex(r'demux_NNN(.*)NN.fastq.gz'), r'\1.trim.fastq.gz') 
 def cutadapt(infile, outfile):
     ''' trims 3' adapter and removes low quality reads '''
-    statement = ''' cutadapt -q %(cutadapt_minphred)s -a %(general_adapter)s
+    statement = ''' cutadapt -q %(cutadapt_minphred)s --m %(cutadapt_minlength) -a %(general_adapter)s
     -o %(outfile)s %(infile)s
     '''
     P.run()
 
 
 # STAR remove Reps
-@transform(cutadapt, suffix('.trim.fastq.gz'), '.rep.bam')
+@follows(mkdir("mappedreps"))
+@transform(cutadapt, regex(r'(\S+).trim.fastq.gz'), r'mappedreps/\1.rep.bam')
 def STARrmRep(infile, outfile):
     ''' maps to repetitive elements, produces 2 files:
         mapped - file1.name; unmapped file2.name '''
+    outprefix = P.snip(outfile, ".bam")
     statement = ''' STAR  --runMode alignReads
     --runThreadN 8
     --genomeDir %(STARrmRep_repbase)s
     --genomeLoad LoadAndRemove
+    --limitBAMsortRAM 10000000000
     --readFilesIn %(infile)s
     --outSAMunmapped Within
     --outFilterMultimapNmax 30
     --outFilterMultimapScoreRange 1
-    --outFileNamePrefix %(general_outputdir)s
+    --outFileNamePrefix %(outprefix)s
     --outSAMattributes All
     --readFilesCommand zcat
     --outStd BAM_Unsorted
-    --outSAMtype BAM Unsorted
+    --outSAMtype BAM SortedByCoordinate
     --outFilterType BySJout
     --outReadsUnmapped Fastx
     --outFilterScoreMin 10
-    --outSAMattrRGline ID:foo
     --alignEndsType EndToEnd
     > %(outfile)s
-      '''
+    '''
     P.run()
 
-# Count Rep
-'''need to write script?'''
 
+# Count Reps
+@follows(STARrmRep)
+@transform(STARrmRep, suffix('.rep.bam'), '.metrics')
+def countRep(infile, outfile):
+    '''counts number reads mapping to each rep element'''
+    statement = '''
+    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
+    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2
+    samtools view %(infile)s | 
+    /t1-data/user/nsampaio/software/gscripts/gscripts/general/count_aligned_from_sam.py 
+    > %(outfile)s
+    '''
+    P.run()
+    
+    
 # FASTQC
 @transform('*bamUnmapped.out.mate1', regex(r'(.*).bamUnmapped.out.mate1'), r'\.fastqc') ### check output file naming from above
 def fastqc2(infile,outfile):
@@ -139,6 +156,7 @@ def fastqc2(infile,outfile):
     statement = ''' fastqc %(infile)s -o %(fastqc2_fastqcdir)s > %(outfile)s
     '''
     P.run()
+
 
 # STAR mapping
 @transform('*bamUnmapped.out.mate1', regex(r'(.*).bamUnmapped.out.mate1'), r'\.fastqc') ### check output file naming from above
@@ -165,6 +183,7 @@ def STARmap(infile,outfile):
     '''
     P.run()
 
+
 # Deduplicate
 @transform(STARmap, suffix('.bam'), '.dedup.bam')
 def dedup(infile,outfile):
@@ -177,6 +196,7 @@ def dedup(infile,outfile):
     --metrics_file %(outfile)s.metrics
     '''
     P.run()
+
 
 # Sort
 @transform(dedup, suffix('dedup.bam'), '.sorted.bam')
