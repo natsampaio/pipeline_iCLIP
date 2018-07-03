@@ -79,35 +79,41 @@ need to change env name from py36 to desired one'''
 
 
 
-
-
-# STAR mapping
-@follows(mkdir("STARmapped"))
-@transform('*.repUnmapped.out.mate1', regex(r'(.*).repUnmapped.out.mate1'), r'STARmapped/\1.bam')
-def STARmap(infile,outfile):
-    ''' maps non-repetitive elements to genome '''
-    outprefix = P.snip(outfile, ".bam")
-    statement = ''' STAR  --runMode alignReads
-    --runThreadN 8
-    --genomeDir %(STARmap_genome)s
-    --genomeLoad LoadAndRemove
-    --readFilesIn %(infile)s
-    --outSAMunmapped Within
-    --outFilterMultimapNmax 1
-    --outFilterMultimapScoreRange 1
-    --outFileNamePrefix %(outprefix)s
-    --outSAMattributes All
-    --outStd BAM_Unsorted
-    --outSAMtype BAM Unsorted
-    --outFilterType BySJout
-    --outReadsUnmapped Fastx
-    --outFilterScoreMin 10
-    --outSAMattrRGline ID:foo
-    --alignEndsType EndToEnd
-    > %(outfile)s 
+#samtools sort
+# @follows(STARmap)
+@transform('*.bam', regex(r'(.*).bam'), r'\1.sorted.bam')
+def samtools_sort(infile, outfile):
+    statement = ''' samtools sort %(infile)s -o %(outfile)s
     '''
     P.run()
-   
+    
+# samtools index
+@follows(samtools_sort)
+@transform(samtools_sort, suffix('.sorted.bam'), '.sorted.bam.bai')
+def samtools_index(infile, outfile):
+    statement = ''' samtools index %(infile)s
+    '''
+    P.run()
+
+# Deduplicate
+@follows(samtools_index)
+@transform('*.sorted.bam', regex(r'(.*).sorted.bam'), r'\1.dedup.bam')
+def dedup(infile,outfile):
+    ''' deduplicate samples based on UMI using umi_tools '''
+    statement = ''' umi_tools dedup -I %(infile)s --output-stats=deduplicated -S %(outfile)s
+    '''
+    P.run()
+    
+# Index
+@transform(dedup, suffix('.dedup.bam'), 'dedup.bam.bai')
+def index2(infile, outfile):
+    ''' creates index of sorted bam file, generates .bai '''
+    statement = '''samtools index %(infile)s
+    '''
+    P.run()    
+    
+    
+    
 # ---------------------------------------------------
 # Generic pipeline tasks
 

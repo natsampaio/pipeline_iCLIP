@@ -170,7 +170,6 @@ def STARmap(infile,outfile):
     statement = ''' STAR  --runMode alignReads
     --runThreadN 8
     --genomeDir %(STARmap_genome)s
-    --genomeLoad LoadAndRemove
     --readFilesIn %(infile)s
     --outSAMunmapped Within
     --outFilterMultimapNmax 1
@@ -188,39 +187,42 @@ def STARmap(infile,outfile):
     '''
     P.run()
 
-
-# Deduplicate
-@transform(STARmap, suffix('.bam'), '.dedup.bam')
-def dedup(infile,outfile):
-    ''' deduplicate samples based on UMI '''
-    statement = ''' 
-    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
-    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2
-    barcode_collapse_pe.py --bam %(infile)s 
-    --out_file %(outfile)s
-    --metrics_file %(outfile)s.metrics
+#samtools sort
+@transform(STARmap, suffix('.bam'), '.sorted.bam')
+def samtools_sort(infile, outfile):
+    statement = ''' samtools sort %(infile)s -o %(outfile)s
+    '''
+    P.run()
+    
+# samtools index1
+@follows(samtools_sort)
+@transform(samtools_sort, suffix('.sorted.bam'), '.sorted.bam.bai')
+def index1(infile, outfile):
+    statement = ''' samtools index %(infile)s
     '''
     P.run()
 
 
-# Sort
-@transform(dedup, suffix('dedup.bam'), '.sorted.bam')
-def sort(infile, outfile):
-    ''' sorts mapped .bam file '''
-    statement = ''' samtools sort %(infile)s -o %(outfile)s
-     '''
+# Deduplicate
+@follows(index1)
+@transform('*.sorted.bam', regex(r'(.*).sorted.bam'), r'\1.dedup.bam')
+def dedup(infile,outfile):
+    ''' deduplicate samples based on UMI using umi_tools '''
+    statement = ''' umi_tools dedup -I %(infile)s --output-stats=deduplicated -S %(outfile)s
+    '''
     P.run()
 
-# Index
-@transform(sort, suffix('.sorted.bam'), '.index.bam')
-def index(infile, outfile):
-    ''' creates index of sorted bam file, generates .bai '''
-    statement = '''samtools index %(infile)s 2> %(outfile)s.log
+
+# samtools index2
+@transform(dedup, suffix('.dedup.bam'), 'dedup.bam.bai')
+def index2(infile, outfile):
+    ''' creates index deduplicated bam file, generates .bai '''
+    statement = '''samtools index %(infile)s
     '''
     P.run()
 
 # Make bigwig
-@follows(index)
+@follows(index2)
 @transform(sort, suffix('.sorted.bam'), '.bw') ### might not work due to only having Read 1
 def makeBigWig(infile, outfile):
     ''' Makes bigwig files for visualization '''
