@@ -98,7 +98,9 @@ def demux(infile, outfiles):
 @transform('*NN.fastq.gz', regex(r'demux_NNN(.*)NN.fastq.gz'), r'\1.trim.fastq.gz') 
 def cutadapt(infile, outfile):
     ''' trims 3' adapter and removes low quality reads '''
-    statement = ''' cutadapt -q %(cutadapt_minphred)s --m %(cutadapt_minlength) -a %(general_adapter)s
+    statement = ''' cutadapt -q %(cutadapt_minphred)s 
+    --minimum-length %(cutadapt_minlength)s 
+    -a %(general_adapter)s
     -o %(outfile)s %(infile)s
     '''
     P.run()
@@ -114,7 +116,6 @@ def STARrmRep(infile, outfile):
     statement = ''' STAR  --runMode alignReads
     --runThreadN 8
     --genomeDir %(STARrmRep_repbase)s
-    --genomeLoad LoadAndRemove
     --limitBAMsortRAM 10000000000
     --readFilesIn %(infile)s
     --outSAMunmapped Within
@@ -135,22 +136,23 @@ def STARrmRep(infile, outfile):
 
 
 # Count Reps
-@follows(STARrmRep)
-@transform(STARrmRep, suffix('.rep.bam'), '.metrics')
-def countRep(infile, outfile):
-    '''counts number reads mapping to each rep element'''
-    statement = '''
-    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
-    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2
-    samtools view %(infile)s | 
-    /t1-data/user/nsampaio/software/gscripts/gscripts/general/count_aligned_from_sam.py 
-    > %(outfile)s
-    '''
-    P.run()
+#@follows(STARrmRep)
+#@transform(STARrmRep, suffix('.rep.bam'), '.metrics')
+#def countRep(infile, outfile):
+#    '''counts number reads mapping to each rep element'''
+#    statement = '''
+#    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
+#    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2
+#    samtools view %(infile)s | 
+#    /t1-data/user/nsampaio/software/gscripts/gscripts/general/count_aligned_from_sam.py 
+#    > %(outfile)s
+#    '''
+#    P.run()
     
     
 # FASTQC
-@transform('*bamUnmapped.out.mate1', regex(r'(.*).bamUnmapped.out.mate1'), r'\.fastqc') ### check output file naming from above
+@follows(STARrmRep)
+@transform('*repUnmapped.out.mate1', regex(r'(.*).repUnmapped.out.mate1'), r'\1.fastqc')
 def fastqc2(infile,outfile):
     ''' does fastqc on mapped repetitive elements from STARrmRep '''
     statement = ''' fastqc %(infile)s -o %(fastqc2_fastqcdir)s > %(outfile)s
@@ -159,25 +161,28 @@ def fastqc2(infile,outfile):
 
 
 # STAR mapping
-@transform('*bamUnmapped.out.mate1', regex(r'(.*).bamUnmapped.out.mate1'), r'\.fastqc') ### check output file naming from above
+@follows(STARrmRep)
+@follows(mkdir("STARmapped"))
+@transform('*.repUnmapped.out.mate1', regex(r'(.*).repUnmapped.out.mate1'), r'STARmapped/\1.bam')
 def STARmap(infile,outfile):
     ''' maps non-repetitive elements to genome '''
+    outprefix = P.snip(outfile, ".bam")
     statement = ''' STAR  --runMode alignReads
     --runThreadN 8
-    --genomedir %(STARmap_genome)s
+    --genomeDir %(STARmap_genome)s
     --genomeLoad LoadAndRemove
     --readFilesIn %(infile)s
     --outSAMunmapped Within
     --outFilterMultimapNmax 1
     --outFilterMultimapScoreRange 1
-    --outFileNamePrefix %(general_outputdir)s
+    --outFileNamePrefix %(outprefix)s
     --outSAMattributes All
     --outStd BAM_Unsorted
     --outSAMtype BAM Unsorted
     --outFilterType BySJout
     --outReadsUnmapped Fastx
     --outFilterScoreMin 10
-    --outSAMattrRGline ID:foo ##### don't understand this bit!
+    --outSAMattrRGline ID:foo
     --alignEndsType EndToEnd
     > %(outfile)s 
     '''
