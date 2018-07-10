@@ -71,31 +71,36 @@ PARAMS = P.getParameters(
 # ---------------------------------------------------
 # Specific pipeline tasks
     
-''' below, use this to change environemtn before calling tool/script
+''' below, use this to change environment before calling tool/script
 need to change env name from py36-v1 to desired one'''
-   
-# PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/py36-v1/bin
-# CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/py36-v1
+# PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/py36-v1/bin;
+# CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/py36-v1;
+
+''' below use command to estimate command computing time and resources'''
+#   /usr/bin/time -o %(startfile)s.time -v
   
 # Demultiplexing
+@follows(mkdir("demultiplexed"))
 @split('*.fastq.gz', '*.demux.fastq.gz')
 def demux(infile, outfiles):    
     ''' demultiplex and move UMI to end of header using iCount '''
     startfile = " ".join(infile)
-    statement = ''' 
-    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/iCount/bin
-    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/iCount
+    statement = '''  
+    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/iCount/bin;
+    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/iCount;
+  
     iCount demultiplex %(startfile)s
     %(adapter)s
     %(demux_barcodes)s
-    --out_dir "%(general_outputdir)s"
+    --out_dir "%(demux_outputdir)s"
     '''
     P.run()
 
 
 # Cutadapt
 @follows(demux)
-@transform('*NN.fastq.gz', regex(r'demux_NNN(.*)NN.fastq.gz'), r'\1.trim.fastq.gz') 
+@follows(mkdir("trimmed"))
+@transform('demultiplexed/*NN.fastq.gz', regex(r'demultiplexed/demux_NNN(.*)NN.fastq.gz'), r'trimmed/\1.trim.fastq.gz') 
 def cutadapt(infile, outfile):
     ''' trims 3' adapter and removes low quality reads '''
     statement = ''' cutadapt -q %(cutadapt_minphred)s 
@@ -108,13 +113,15 @@ def cutadapt(infile, outfile):
 
 # STAR remove Reps
 @follows(mkdir("mappedreps"))
-@transform(cutadapt, regex(r'(\S+).trim.fastq.gz'), r'mappedreps/\1.rep.bam')
+@transform(cutadapt, regex(r'trimmed/(\S+).trim.fastq.gz'), r'mappedreps/\1.rep.bam')
 def STARrmRep(infile, outfile):
     ''' maps to repetitive elements, produces 2 files:
-        mapped - file1.name; unmapped file2.name '''
+        mapped - name.bam; unmapped name. '''
     outprefix = P.snip(outfile, ".bam")
-    statement = ''' STAR  --runMode alignReads
-    --runThreadN 8
+    job_threads = PARAMS["STARrmRep_threads"]
+    statement = '''
+    STAR  --runMode alignReads
+    --runThreadN %(job_threads)i
     --genomeDir %(STARrmRep_repbase)s
     --limitBAMsortRAM 10000000000
     --readFilesIn %(infile)s
@@ -125,7 +132,7 @@ def STARrmRep(infile, outfile):
     --outSAMattributes All
     --readFilesCommand zcat
     --outStd BAM_Unsorted
-    --outSAMtype BAM SortedByCoordinate
+    --outSAMtype BAM Unsorted
     --outFilterType BySJout
     --outReadsUnmapped Fastx
     --outFilterScoreMin 10
@@ -136,26 +143,27 @@ def STARrmRep(infile, outfile):
 
 
 # Count Reps
-#@follows(STARrmRep)
-#@transform(STARrmRep, suffix('.rep.bam'), '.metrics')
-#def countRep(infile, outfile):
-#    '''counts number reads mapping to each rep element'''
-#    statement = '''
-#    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
-#    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2
-#    samtools view %(infile)s | 
-#    /t1-data/user/nsampaio/software/gscripts/gscripts/general/count_aligned_from_sam.py 
-#    > %(outfile)s
-#    '''
-#    P.run()
+    ####### consider doing deduplication before this step
+@transform(STARrmRep, suffix('.rep.bam'), '.metrics')
+def countRep(infile, outfile):
+    '''counts number reads mapping to each repetitive element'''
+    statement = '''
+    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin;
+    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2;
+    samtools view %(infile)s | 
+    /t1-data/user/nsampaio/software/gscripts/gscripts/general/count_aligned_from_sam.py 
+    > %(outfile)s
+    '''
+    P.run()
     
     
 # FASTQC
 @follows(STARrmRep)
-@transform('*repUnmapped.out.mate1', regex(r'(.*).repUnmapped.out.mate1'), r'\1.fastqc')
+@follows(mkdir("fastqc2"))
+@transform('mappedreps/*repUnmapped.out.mate1', regex(r'mappedreps/(.*).repUnmapped.out.mate1'), r'fastqc2/\1.fastqc')
 def fastqc2(infile,outfile):
     ''' does fastqc on mapped repetitive elements from STARrmRep '''
-    statement = ''' fastqc %(infile)s -o %(fastqc2_fastqcdir)s > %(outfile)s
+    statement = ''' fastqc %(infile)s -o %(general_outputdir)s > %(outfile)s
     '''
     P.run()
 
@@ -163,12 +171,14 @@ def fastqc2(infile,outfile):
 # STAR mapping
 @follows(STARrmRep)
 @follows(mkdir("STARmapped"))
-@transform('*.repUnmapped.out.mate1', regex(r'(.*).repUnmapped.out.mate1'), r'STARmapped/\1.bam')
+@transform('mappedreps/*repUnmapped.out.mate1', regex(r'mappedreps/(.*).repUnmapped.out.mate1'), r'STARmapped/\1.bam')
 def STARmap(infile,outfile):
     ''' maps non-repetitive elements to genome '''
     outprefix = P.snip(outfile, ".bam")
-    statement = ''' STAR  --runMode alignReads
-    --runThreadN 8
+    job_threads = PARAMS["STARmap_threads"]
+    statement = '''
+    STAR  --runMode alignReads
+    --runThreadN %(job_threads)i
     --genomeDir %(STARmap_genome)s
     --readFilesIn %(infile)s
     --outSAMunmapped Within
@@ -205,10 +215,11 @@ def index1(infile, outfile):
 
 # Deduplicate
 @follows(index1)
-@transform('*.sorted.bam', regex(r'(.*).sorted.bam'), r'\1.dedup.bam')
+@transform(samtools_sort, regex(r'(.*).sorted.bam'), r'\1.dedup.bam')
 def dedup(infile,outfile):
     ''' deduplicate samples based on UMI using umi_tools '''
-    statement = ''' umi_tools dedup -I %(infile)s --output-stats=deduplicated -S %(outfile)s
+    statement = '''
+    umi_tools dedup -I %(infile)s --output-stats=deduplicated -S %(outfile)s
     '''
     P.run()
 
@@ -223,13 +234,14 @@ def index2(infile, outfile):
 
 # Make bigwig
 @follows(index2)
-@transform(sort, suffix('.sorted.bam'), '.bw') ### might not work due to only having Read 1
+@transform(samtools_sort, suffix('.sorted.bam'), '.bw')
 def makeBigWig(infile, outfile):
-    ''' Makes bigwig files for visualization '''
+    ''' Makes bigwig files for visualization 
+    #### not working because I only have read 1!!!!! '''
     statement = ''' 
     PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
     CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2
-    make_bigwig_files.py
+    /t1-data/user/nsampaio/software/gscripts/gscripts/general/make_bigwig_files.py
     --bam %(infile)s
     --genome %(general_chromsize)s
     --bw_pos %(outfile)
@@ -238,8 +250,8 @@ def makeBigWig(infile, outfile):
   
 
 # Call peaks
-@follows(index)
-@transform(sort, suffix('.sorted.bam'), '.bed')
+@follows(index2)
+@transform(dedup, suffix('.sorted.bam'), '.bed')
 def callPeaks(infile, outfile):
     ''' Calls peaks using CLIPper package'''
     statement = '''
@@ -249,6 +261,7 @@ def callPeaks(infile, outfile):
     '''
     P.run() ###### need to get clipper to work and figure out commands
 
+
 # Fix scores
 @transform(callPeaks, suffix('.bed'), '.fixed.bed')
 def fixScores(infile, outfile):
@@ -256,11 +269,12 @@ def fixScores(infile, outfile):
     statement = ''' 
     PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
     CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/Py2/iCount
-    python ~/gscripts/gscripts/clipseq/fix_scores.py
+    python /t1-data/user/nsampaio/software/gscripts/gscripts/clipseq/fix_scores.py
     --bed %(infile)s
     --out_%(outfile)s
     '''
     P.run()
+
 
 # Bed to BigBed
 @transform(fixScores, suffix('.fixed.bed'), '.fixed.bb')
@@ -287,3 +301,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(P.main(sys.argv))
+

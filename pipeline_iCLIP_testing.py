@@ -77,41 +77,24 @@ need to change env name from py36 to desired one'''
 # PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/py36-v1/bin
 # CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/py36-v1
 
-
-
-#samtools sort
-# @follows(STARmap)
-@transform('*.bam', regex(r'(.*).bam'), r'\1.sorted.bam')
-def samtools_sort(infile, outfile):
-    statement = ''' samtools sort %(infile)s -o %(outfile)s
-    '''
-    P.run()
-    
-# samtools index
-@follows(samtools_sort)
-@transform(samtools_sort, suffix('.sorted.bam'), '.sorted.bam.bai')
-def samtools_index(infile, outfile):
-    statement = ''' samtools index %(infile)s
-    '''
-    P.run()
-
 # Deduplicate
-@follows(samtools_index)
-@transform('*.sorted.bam', regex(r'(.*).sorted.bam'), r'\1.dedup.bam')
+
+@transform('STARmapped/*.sorted.bam', regex(r'STARmapped/(.*).sorted.bam'), r'\1.dedup.bam')
 def dedup(infile,outfile):
     ''' deduplicate samples based on UMI using umi_tools '''
-    statement = ''' umi_tools dedup -I %(infile)s --output-stats=deduplicated -S %(outfile)s
+    statement = ''' /usr/bin/time -o %(outfile)s.time -v
+    umi_tools dedup -I %(infile)s --output-stats=deduplicated -S %(outfile)s
     '''
     P.run()
-    
-# Index
+
+
+# samtools index2
 @transform(dedup, suffix('.dedup.bam'), 'dedup.bam.bai')
 def index2(infile, outfile):
-    ''' creates index of sorted bam file, generates .bai '''
+    ''' creates index deduplicated bam file, generates .bai '''
     statement = '''samtools index %(infile)s
     '''
-    P.run()    
-    
+    P.run()
     
     
 # ---------------------------------------------------
