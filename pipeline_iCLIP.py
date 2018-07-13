@@ -145,9 +145,9 @@ def STARrmRep(infile, outfile):
 @transform(STARrmRep, suffix('.rep.bam'), '.rep.new.bam')
 def rep_umifix(infile, outfile):
     statement = ''' samtools view -h -o %(infile)s.sam %(infile)s &&
-    cut -f1 %(infile)s.sam | sed 's/\(.*\):/\1_/' >%(infile)s.1.txt &&
-    cut -f 2- %(infile)s.sam > %(infile)s.2.txt &&
-    paste %(infile)s.1.txt %(infile)s.2.txt > %(infile)s.new.sam &&
+    cut -f1 %(infile)s.sam | sed 's/\(.*\):/\1_/' >%(infile)s.names.txt &&
+    cut -f 2- %(infile)s.sam > %(infile)s.nonames.txt &&
+    paste %(infile)s.names.txt %(infile)s.nonames.txt > %(infile)s.new.sam &&
     samtools view -h -o %(outfile)s %(infile)s.new.sam '''
     P.run()
 
@@ -237,9 +237,9 @@ def STARmap(infile,outfile):
 @transform(STARmap, suffix('.bam'), '.new.bam')
 def umifix(infile, outfile):
     statement = ''' samtools view -h -o %(infile)s.sam %(infile)s &&
-    cut -f1 %(infile)s.sam | sed 's/\(.*\):/\1_/' >%(infile)s.1.txt &&
-    cut -f 2- %(infile)s.sam > %(infile)s.2.txt &&
-    paste %(infile)s.1.txt %(infile)s.2.txt > %(infile)s.new.sam &&
+    cut -f1 %(infile)s.sam | sed 's/\(.*\):/\1_/' >%(infile)s.names.txt &&
+    cut -f 2- %(infile)s.sam > %(infile)s.nonames.txt &&
+    paste %(infile)s.names.txt %(infile)s.nonames.txt > %(infile)s.new.sam &&
     samtools view -h -o %(outfile)s %(infile)s.new.sam '''
     P.run()
 
