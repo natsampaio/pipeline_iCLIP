@@ -77,12 +77,44 @@ need to change env name from py36 to desired one'''
 # PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/py36-v1/bin
 # CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/py36-v1
 
-# Deduplicate
+# Testing Deduplicate
+# series of commands to fix bam file names to call UMI
+    
+    
+# series of commands to fix bam file names to call UMI
+@transform('*.bam', regex(r'(.*).bam'), r'\1.new.bam')
+def umifix(infile, outfile):
+    statement = ''' samtools view -h -o %(infile)s.sam %(infile)s &&
+    cut -f1 %(infile)s.sam | sed 's/\(.*\):/\1_/' >%(infile)s.names.txt &&
+    cut -f 2- %(infile)s.sam > %(infile)s.nonames.txt &&
+    paste %(infile)s.names.txt %(infile)s.nonames.txt > %(infile)s.new.sam &&
+    samtools view -h -o %(outfile)s %(infile)s.new.sam '''
+    P.run()
 
-@transform('STARmapped/*.sorted.bam', regex(r'STARmapped/(.*).sorted.bam'), r'\1.dedup.bam')
+
+#samtools sort
+@transform(umifix, suffix('.new.bam'), '.sorted.bam')
+def samtools_sort(infile, outfile):
+    statement = ''' samtools sort %(infile)s -o %(outfile)s
+    '''
+    P.run()
+    
+    
+# samtools index1
+@follows(samtools_sort)
+@transform(samtools_sort, suffix('.sorted.bam'), '.sorted.bam.bai')
+def index1(infile, outfile):
+    statement = ''' samtools index %(infile)s
+    '''
+    P.run()
+
+
+# Deduplicate
+@follows(index1)
+@transform(samtools_sort, regex(r'(.*).sorted.bam'), r'\1.dedup.bam')
 def dedup(infile,outfile):
     ''' deduplicate samples based on UMI using umi_tools '''
-    statement = ''' /usr/bin/time -o %(outfile)s.time -v
+    statement = '''
     umi_tools dedup -I %(infile)s --output-stats=deduplicated -S %(outfile)s
     '''
     P.run()

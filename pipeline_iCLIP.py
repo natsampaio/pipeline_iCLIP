@@ -141,10 +141,46 @@ def STARrmRep(infile, outfile):
     '''
     P.run()
 
+# series of commands to fix bam file names to call UMI
+@transform(STARrmRep, suffix('.rep.bam'), '.rep.new.bam')
+def rep_umifix(infile, outfile):
+    statement = ''' samtools view -h -o %(infile)s.sam %(infile)s &&
+    cut -f1 %(infile)s.sam | sed 's/\(.*\):/\1_/' >%(infile)s.1.txt &&
+    cut -f 2- %(infile)s.sam > %(infile)s.2.txt &&
+    paste %(infile)s.1.txt %(infile)s.2.txt > %(infile)s.new.sam &&
+    samtools view -h -o %(outfile)s %(infile)s.new.sam '''
+    P.run()
+
+
+#samtools sort
+@transform(rep_umifix, suffix('.rep.new.bam'), '.rep.sorted.bam')
+def rep_sort(infile, outfile):
+    statement = ''' samtools sort %(infile)s -o %(outfile)s
+    '''
+    P.run()
+    
+    
+# samtools index1
+@transform(rep_sort, suffix('.rep.sorted.bam'), '.rep.sorted.bam.bai')
+def rep_index(infile, outfile):
+    statement = ''' samtools index %(infile)s
+    '''
+    P.run()
+
+
+# Deduplicate
+@follows(rep_index)
+@transform(rep_sort, regex(r'(.*).rep.sorted.bam'), r'\1.rep.dedup.bam')
+def rep_dedup(infile,outfile):
+    ''' deduplicate samples based on UMI using umi_tools '''
+    statement = '''
+    umi_tools dedup -I %(infile)s --output-stats=deduplicated -S %(outfile)s
+    '''
+    P.run()
+
 
 # Count Reps
-    ####### consider doing deduplication before this step
-@transform(STARrmRep, suffix('.rep.bam'), '.metrics')
+@transform(rep_dedup, suffix('.rep.dedup.bam'), '.rep.metrics')
 def countRep(infile, outfile):
     '''counts number reads mapping to each repetitive element'''
     statement = '''
@@ -157,15 +193,15 @@ def countRep(infile, outfile):
     P.run()
     
     
-# FASTQC
-@follows(STARrmRep)
-@follows(mkdir("fastqc2"))
-@transform('mappedreps/*repUnmapped.out.mate1', regex(r'mappedreps/(.*).repUnmapped.out.mate1'), r'fastqc2/\1.fastqc')
-def fastqc2(infile,outfile):
-    ''' does fastqc on mapped repetitive elements from STARrmRep '''
-    statement = ''' fastqc %(infile)s -o %(general_outputdir)s > %(outfile)s
-    '''
-    P.run()
+## FASTQC
+#@follows(STARrmRep)
+#@follows(mkdir("fastqc2"))
+#@transform('mappedreps/*repUnmapped.out.mate1', regex(r'mappedreps/(.*).repUnmapped.out.mate1'), r'fastqc2/\1.fastqc')
+#def fastqc2(infile,outfile):
+#    ''' does fastqc on mapped repetitive elements from STARrmRep '''
+#    statement = ''' fastqc %(infile)s -o %(general_outputdir)s/fastqc2 > %(outfile)s
+#    '''
+#    P.run()
 
 
 # STAR mapping
@@ -197,12 +233,24 @@ def STARmap(infile,outfile):
     '''
     P.run()
 
+# series of commands to fix bam file names to call UMI
+@transform(STARmap, suffix('.bam'), '.new.bam')
+def umifix(infile, outfile):
+    statement = ''' samtools view -h -o %(infile)s.sam %(infile)s &&
+    cut -f1 %(infile)s.sam | sed 's/\(.*\):/\1_/' >%(infile)s.1.txt &&
+    cut -f 2- %(infile)s.sam > %(infile)s.2.txt &&
+    paste %(infile)s.1.txt %(infile)s.2.txt > %(infile)s.new.sam &&
+    samtools view -h -o %(outfile)s %(infile)s.new.sam '''
+    P.run()
+
+
 #samtools sort
-@transform(STARmap, suffix('.bam'), '.sorted.bam')
+@transform(umifix, suffix('.new.bam'), '.sorted.bam')
 def samtools_sort(infile, outfile):
     statement = ''' samtools sort %(infile)s -o %(outfile)s
     '''
     P.run()
+    
     
 # samtools index1
 @follows(samtools_sort)
@@ -232,61 +280,66 @@ def index2(infile, outfile):
     '''
     P.run()
 
-# Make bigwig
-@follows(index2)
-@transform(samtools_sort, suffix('.sorted.bam'), '.bw')
-def makeBigWig(infile, outfile):
-    ''' Makes bigwig files for visualization 
-    #### not working because I only have read 1!!!!! '''
-    statement = ''' 
-    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
-    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2
-    /t1-data/user/nsampaio/software/gscripts/gscripts/general/make_bigwig_files.py
-    --bam %(infile)s
-    --genome %(general_chromsize)s
-    --bw_pos %(outfile)
-    '''
-    P.run()
+
+## Make bigwig
+#@follows(index2)
+#@transform(samtools_sort, suffix('.sorted.bam'), '.bw')
+#def makeBigWig(infile, outfile):
+#    ''' Makes bigwig files for visualization 
+#    #### not working because I only have read 1!!!!! '''
+#    statement = ''' 
+#    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
+#    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2
+#    /t1-data/user/nsampaio/software/gscripts/gscripts/general/make_bigwig_files.py
+#    --bam %(infile)s
+#    --genome %(general_chromsize)s
+#    --bw_pos %(outfile)
+#    '''
+#    P.run()
   
 
-# Call peaks
-@follows(index2)
-@transform(dedup, suffix('.sorted.bam'), '.bed')
-def callPeaks(infile, outfile):
-    ''' Calls peaks using CLIPper package'''
-    statement = '''
-    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/clipper/bin
-    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/clipper
-    CLIPPER COMMANDS
-    '''
-    P.run() ###### need to get clipper to work and figure out commands
-
-
-# Fix scores
-@transform(callPeaks, suffix('.bed'), '.fixed.bed')
-def fixScores(infile, outfile):
-    ''' Fixes p-values to be bed compatible '''
-    statement = ''' 
-    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
-    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/Py2/iCount
-    python /t1-data/user/nsampaio/software/gscripts/gscripts/clipseq/fix_scores.py
-    --bed %(infile)s
-    --out_%(outfile)s
-    '''
-    P.run()
-
-
-# Bed to BigBed
-@transform(fixScores, suffix('.fixed.bed'), '.fixed.bb')
-def bigBed(infile, outfile):
-    ''' Converts bed file to bigBed file for uploading to the genomeBrowser '''
-    statement = ''' bedToBigBed %(infile)s
-    %(general_chromsize)s
-    %(outfile)s
-    -type=bed6+4
-    '''
-    P.run()
+## Call peaks
+#@follows(index2)
+#@transform(dedup, suffix('.sorted.bam'), '.bed')
+#def callPeaks(infile, outfile):
+#    ''' Calls peaks using CLIPper package'''
+#    statement = '''
+#    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/clipper/bin
+#    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/envs/clipper
+#    CLIPPER COMMANDS
+#    '''
+#    P.run() ###### need to get clipper to work and figure out commands
+#
+#
+## Fix scores
+#@transform(callPeaks, suffix('.bed'), '.fixed.bed')
+#def fixScores(infile, outfile):
+#    ''' Fixes p-values to be bed compatible '''
+#    statement = ''' 
+#    PATH=/t1-data/user/nsampaio/py36-v1/conda-install/envs/Py2/bin
+#    CONDA_PREFIX=/t1-data/user/nsampaio/py36-v1/conda-install/Py2/iCount
+#    python /t1-data/user/nsampaio/software/gscripts/gscripts/clipseq/fix_scores.py
+#    --bed %(infile)s
+#    --out_%(outfile)s
+#    '''
+#    P.run()
+#
+#
+## Bed to BigBed
+#@transform(fixScores, suffix('.fixed.bed'), '.fixed.bb')
+#def bigBed(infile, outfile):
+#    ''' Converts bed file to bigBed file for uploading to the genomeBrowser '''
+#    statement = ''' bedToBigBed %(infile)s
+#    %(general_chromsize)s
+#    %(outfile)s
+#    -type=bed6+4
+#    '''
+#    P.run()
     
+@follows(countRep, dedup)
+def full():
+    pass
+
    
 # ---------------------------------------------------
 # Generic pipeline tasks
