@@ -136,7 +136,7 @@ def STARrmRep(infile, outfile):
     --outFilterType BySJout
     --outReadsUnmapped Fastx
     --outFilterScoreMin 10
-    --alignEndsType EndToEnd
+    --alignEndsType Local
     > %(outfile)s
     '''
     P.run()
@@ -228,7 +228,7 @@ def STARmap(infile,outfile):
     --outReadsUnmapped Fastx
     --outFilterScoreMin 10
     --outSAMattrRGline ID:foo
-    --alignEndsType EndToEnd
+    --alignEndsType Local
     > %(outfile)s 
     '''
     P.run()
